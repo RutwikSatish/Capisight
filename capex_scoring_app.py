@@ -1,50 +1,62 @@
 """
 Capisight - CAPEX project scoring engine (front half)
 
-Capisight scores and ranks capital-expenditure projects, grouped by their AIM,
-and allocates a budget across aims. It is the "front half" of a larger concept:
-deciding where capital should go, with an honest, transparent method.
+Scores capital-expenditure projects grouped by their AIM, ranks them within each
+aim, and allocates a budget across aims. Polished UI: header, KPI cards, tabs,
+and Plotly charts.
 
 WHY GROUP BY AIM
 McKinsey ("Managing a moonshot") argues capital projects should be grouped by
 aim rather than lumped together, because different aims warrant different
 evaluation criteria. A mandatory safety project and a growth bet do not belong
-on the same ranked list. So Capisight:
-  1. tags each project with one of four aims,
-  2. scores each aim's projects on that aim's own weight profile,
-  3. ranks projects WITHIN each aim, and
-  4. allocates a budget ACROSS aims (the user sets each aim's share), because
-     there is no single yardstick that compares across aims.
+on the same ranked list. So Capisight scores each aim on its own weight profile,
+ranks WITHIN each aim, and allocates a budget ACROSS aims (shares are hard
+targets; money is never moved across aims automatically).
 
-HONESTY NOTES (these matter)
-  - The four aims are from McKinsey. The default weight profiles per aim are a
-    reasonable starting hypothesis, NOT a sourced prescription. Every weight is
-    user-editable.
-  - Sample projects and their aim tags are ILLUSTRATIVE examples, not validated
-    figures. Edit them or replace them with your own.
-  - Per-aim budget shares are hard targets: money does NOT move across aims
-    automatically. If a share strands money, the app says so and asks you to
-    rebalance, rather than silently spending it elsewhere. This preserves the
-    "aims are not comparable" principle.
+HONESTY NOTES
+  - The four aims are from McKinsey. The default per-aim weight profiles are a
+    starting hypothesis, NOT a sourced prescription. Every weight is editable.
+  - Sample projects and aim tags are ILLUSTRATIVE examples, not validated figures.
+  - All "score" visuals stay WITHIN one aim. Only money (cost, budget) is shown
+    across aims, because dollars are comparable where scores are not.
 
-NOT INCLUDED YET
-  - The experimental causal "back half" (did the spend actually move the
-    outcome?) is a separate module, deliberately not built here.
+NOT INCLUDED: the experimental causal "back half".
 
 Run locally:
     pip install -r requirements.txt
-    streamlit run app.py
+    streamlit run capex_scoring_app.py
 """
 
 import streamlit as st
 import pandas as pd
-import altair as alt  # ships with Streamlit; no extra dependency to deploy
+import plotly.graph_objects as go
 
-st.set_page_config(page_title="Capisight - CAPEX scoring", layout="wide")
+st.set_page_config(page_title="Capisight - CAPEX scoring", page_icon="📊", layout="wide")
 
 # ---------------------------------------------------------------------------
-# Criteria. direction: "higher" = bigger raw value is better (NPV);
-# "lower" = smaller is better (Risk, Cost, Payback).
+# Palette (matches the dark-green theme)
+# ---------------------------------------------------------------------------
+GREEN = "#1D9E75"
+GREEN_D = "#0F6E56"
+PURPLE = "#7F77DD"
+CORAL = "#D85A30"
+GREY = "#D3D1C7"
+INK = "#e8ede9"
+MUTED = "#9aa6a0"
+SURFACE = "#161b18"
+LINE = "#283330"
+
+PLOTLY_LAYOUT = dict(
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(color=INK, size=13),
+    margin=dict(l=10, r=10, t=10, b=10),
+    xaxis=dict(gridcolor=LINE, zerolinecolor=LINE),
+    yaxis=dict(gridcolor=LINE, zerolinecolor=LINE),
+)
+
+# ---------------------------------------------------------------------------
+# Criteria & aims
 # ---------------------------------------------------------------------------
 CRITERIA = [
     {"key": "npv",         "label": "NPV (USD)",                 "direction": "higher"},
@@ -56,9 +68,8 @@ CRITERIA = [
     {"key": "cost",        "label": "Estimated cost (USD)",      "direction": "lower"},
 ]
 CRIT_KEYS = [c["key"] for c in CRITERIA]
+LABEL = {c["key"]: c["label"] for c in CRITERIA}
 
-# Four aims (McKinsey). Default per-aim weight profiles are a starting
-# hypothesis only; every value is user-editable in the sidebar.
 AIMS = ["Regulatory / safety", "Business-as-usual", "New growth", "Improve performance"]
 
 DEFAULT_AIM_WEIGHTS = {
@@ -68,8 +79,6 @@ DEFAULT_AIM_WEIGHTS = {
     "Improve performance":   {"npv": 15, "roi": 15, "payback": 10, "strategic": 10, "operational": 30, "risk": 10, "cost": 10},
 }
 
-# Illustrative sample data (from the author's original model), tagged with an
-# aim. Values and tags are illustrative, not validated.
 SAMPLE_PROJECTS = pd.DataFrame([
     {"Project": "Automation Line A",         "Aim": "New growth",          "cost": 750000, "npv": 400000, "roi": 18.5, "strategic": 8, "operational": 7, "risk": 3, "payback": 4.2},
     {"Project": "Energy Efficiency Retrofit","Aim": "Improve performance", "cost": 300000, "npv": 150000, "roi": 20.0, "strategic": 7, "operational": 6, "risk": 4, "payback": 3.0},
@@ -83,8 +92,6 @@ SAMPLE_PROJECTS = pd.DataFrame([
 
 
 def normalize_column(series: pd.Series, direction: str) -> pd.Series:
-    """Min-max normalize one criterion to 0-1, respecting direction.
-    If all values equal (or only one project), everyone scores 1.0 for it."""
     lo, hi = series.min(), series.max()
     if hi == lo:
         return pd.Series([1.0] * len(series), index=series.index)
@@ -94,16 +101,12 @@ def normalize_column(series: pd.Series, direction: str) -> pd.Series:
 
 
 def compute_scores(projects: pd.DataFrame, weights: dict):
-    """Score a set of projects (one bucket) on a weight profile.
-    Normalization is within this set, so ranks are within-bucket.
-    Returns (scored_df_sorted, effective_weights)."""
     total_w = sum(weights.values())
     eff = {k: (w / total_w if total_w > 0 else 0) for k, w in weights.items()}
     out = projects.copy().reset_index(drop=True)
     weighted_total = pd.Series([0.0] * len(out), index=out.index)
     for c in CRITERIA:
-        norm = normalize_column(out[c["key"]], c["direction"])
-        weighted_total += norm * eff[c["key"]]
+        weighted_total += normalize_column(out[c["key"]], c["direction"]) * eff[c["key"]]
     out["Score"] = weighted_total
     out = out.sort_values("Score", ascending=False).reset_index(drop=True)
     out.insert(0, "Rank", out.index + 1)
@@ -111,8 +114,6 @@ def compute_scores(projects: pd.DataFrame, weights: dict):
 
 
 def greedy_select(scored: pd.DataFrame, budget: float):
-    """Fund highest-scoring projects in rank order until the budget runs out.
-    Skips a project that doesn't fit and keeps trying lower-ranked ones."""
     chosen, spent = [], 0.0
     for _, row in scored.iterrows():
         if spent + row["cost"] <= budget:
@@ -121,56 +122,28 @@ def greedy_select(scored: pd.DataFrame, budget: float):
     return chosen, spent
 
 
+def kpi_card(col, label, value, sub=None, sub_color=MUTED):
+    sub_html = f'<div style="color:{sub_color};font-size:12px;margin-top:4px">{sub}</div>' if sub else ""
+    col.markdown(
+        f'''<div style="background:{SURFACE};border:1px solid {LINE};border-radius:12px;padding:16px 18px">
+        <div style="color:{MUTED};font-size:12px;letter-spacing:.06em;text-transform:uppercase">{label}</div>
+        <div style="color:{INK};font-size:26px;font-weight:650;margin-top:6px">{value}</div>
+        {sub_html}</div>''',
+        unsafe_allow_html=True,
+    )
+
+
 # ---------------------------------------------------------------------------
-# Session state
+# State
 # ---------------------------------------------------------------------------
 if "projects" not in st.session_state:
     st.session_state.projects = SAMPLE_PROJECTS.copy()
 
-st.title("Capisight")
-st.caption(
-    "Score capital projects, grouped by their aim, then allocate a budget across "
-    "aims. A mandatory safety project and a growth bet are not ranked on the same "
-    "yardstick. Sample projects and aim tags are illustrative examples, not "
-    "validated figures \u2014 edit them or add your own."
-)
-
-# ---------------------------------------------------------------------------
-# Sidebar: per-aim weight profiles
-# ---------------------------------------------------------------------------
-st.sidebar.header("Weights by aim")
-st.sidebar.caption(
-    "Each aim has its own weight profile. Pick an aim to tune how its projects "
-    "are scored. Values are relative \u2014 auto-normalized to 100% within the aim."
-)
-
 for aim in AIMS:
     for k in CRIT_KEYS:
-        skey = f"w_{aim}_{k}"
-        if skey not in st.session_state:
-            st.session_state[skey] = DEFAULT_AIM_WEIGHTS[aim][k]
-
-active_aim = st.sidebar.selectbox("Aim to edit", AIMS, index=0)
-
-if active_aim == "Regulatory / safety":
-    st.sidebar.info(
-        "Regulatory / safety projects are often mandatory rather than ROI-ranked. "
-        "Scoring helps prioritize among them, but in practice these are frequently "
-        "'must-do' regardless of score."
-    )
-
-for c in CRITERIA:
-    arrow = "higher is better" if c["direction"] == "higher" else "lower is better"
-    st.sidebar.slider(
-        f"{c['label']}  ({arrow})",
-        min_value=0, max_value=40, step=1,
-        key=f"w_{active_aim}_{c['key']}",
-    )
-
-if st.sidebar.button("Reset this aim to defaults"):
-    for k in CRIT_KEYS:
-        st.session_state[f"w_{active_aim}_{k}"] = DEFAULT_AIM_WEIGHTS[active_aim][k]
-    st.rerun()
+        sk = f"w_{aim}_{k}"
+        if sk not in st.session_state:
+            st.session_state[sk] = DEFAULT_AIM_WEIGHTS[aim][k]
 
 
 def aim_weights(aim):
@@ -178,255 +151,248 @@ def aim_weights(aim):
 
 
 # ---------------------------------------------------------------------------
-# Editable projects
+# Header
 # ---------------------------------------------------------------------------
-st.subheader("Projects")
-st.caption("Edit any cell, change a project's aim, add rows, or delete rows.")
-edited = st.data_editor(
-    st.session_state.projects,
-    num_rows="dynamic",
-    use_container_width=True,
-    column_config={
-        "Aim": st.column_config.SelectboxColumn("Aim", options=AIMS, required=True),
-    },
-    key="editor",
+st.markdown(
+    f'''<div style="padding:8px 0 4px">
+    <span style="font-size:30px;font-weight:700;color:{INK}">📊 Capisight</span>
+    <div style="color:{MUTED};font-size:15px;margin-top:2px">
+    CAPEX project scoring &mdash; grouped by aim, ranked within aim, budgeted across aims</div>
+    </div>''',
+    unsafe_allow_html=True,
 )
-st.session_state.projects = edited
 
 # ---------------------------------------------------------------------------
-# Within-bucket ranking
+# Sidebar: per-aim weights
 # ---------------------------------------------------------------------------
-valid = edited.dropna(subset=["Aim"]) if "Aim" in edited.columns else edited
-st.subheader("Ranked results, within each aim")
+st.sidebar.header("Weights by aim")
+st.sidebar.caption(
+    "Each aim has its own weight profile. Pick an aim to tune it. Values are "
+    "relative \u2014 auto-normalized to 100% within the aim."
+)
+active_aim = st.sidebar.selectbox("Aim to edit", AIMS, index=0)
+if active_aim == "Regulatory / safety":
+    st.sidebar.info(
+        "Regulatory / safety projects are often mandatory rather than ROI-ranked. "
+        "Scoring helps prioritize among them, but these are frequently 'must-do'."
+    )
+for c in CRITERIA:
+    arrow = "higher is better" if c["direction"] == "higher" else "lower is better"
+    st.sidebar.slider(f"{c['label']}  ({arrow})", 0, 40, step=1, key=f"w_{active_aim}_{c['key']}")
+if st.sidebar.button("Reset this aim to defaults"):
+    for k in CRIT_KEYS:
+        st.session_state[f"w_{active_aim}_{k}"] = DEFAULT_AIM_WEIGHTS[active_aim][k]
+    st.rerun()
 
-bucket_scores = {}
-bucket_effweights = {}  # aim -> effective (normalized) weights, for the breakdown visual
+# ---------------------------------------------------------------------------
+# Compute everything up front (so KPI cards can summarize)
+# ---------------------------------------------------------------------------
+projects_df = st.session_state.projects
+valid = projects_df.dropna(subset=["Aim"]) if "Aim" in projects_df.columns else projects_df
+
+bucket_scores, bucket_eff = {}, {}
 for aim in AIMS:
     bucket = valid[valid["Aim"] == aim]
     if len(bucket) == 0:
         continue
     w = aim_weights(aim)
     if sum(w.values()) == 0:
-        st.warning(f"**{aim}**: all weights are zero \u2014 set at least one to rank.")
         continue
     scored, eff = compute_scores(bucket, w)
     bucket_scores[aim] = scored
-    bucket_effweights[aim] = eff
+    bucket_eff[aim] = eff
 
-    st.markdown(f"**{aim}**  ({len(bucket)} project{'s' if len(bucket) != 1 else ''})")
-    cols = ["Rank", "Project", "Score"] + CRIT_KEYS
-    show = scored[cols].copy()
-    show["Score"] = show["Score"].map(lambda x: f"{x:.3f}")
-    st.dataframe(show, use_container_width=True, hide_index=True)
+# ---------------------------------------------------------------------------
+# KPI cards (portfolio-level facts only; never a cross-aim score)
+# ---------------------------------------------------------------------------
+n_projects = len(valid)
+total_cost = float(valid["cost"].sum()) if n_projects else 0.0
+n_aims_used = valid["Aim"].nunique() if n_projects else 0
+c1, c2, c3, c4 = st.columns(4)
+kpi_card(c1, "Projects", f"{n_projects}")
+kpi_card(c2, "Aims in use", f"{n_aims_used} / {len(AIMS)}")
+kpi_card(c3, "Total cost of all projects", f"${total_cost:,.0f}")
+kpi_card(c4, "Criteria per project", f"{len(CRITERIA)}")
 
-    # Visual 1: within-aim ranking bars (horizontal, sorted by score).
-    # Comparison is valid here because all bars share this aim's weights.
-    if len(scored) >= 1:
-        rank_chart = (
-            alt.Chart(scored)
-            .mark_bar(color="#1D9E75")
-            .encode(
-                x=alt.X("Score:Q", title="Score (0-1, within this aim)",
-                        scale=alt.Scale(domain=[0, 1])),
-                y=alt.Y("Project:N", sort="-x", title=None),
-                tooltip=["Project", alt.Tooltip("Score:Q", format=".3f"),
-                         "cost", "npv", "roi"],
-            )
-            .properties(height=max(80, 38 * len(scored)))
+st.markdown(
+    f'<div style="color:{MUTED};font-size:13px;margin:14px 0 4px">'
+    f'Scores compare projects <b>only within an aim</b>. Sample data is illustrative, '
+    f'not validated. Edit projects and weights to fit your portfolio.</div>',
+    unsafe_allow_html=True,
+)
+
+# ---------------------------------------------------------------------------
+# Tabs
+# ---------------------------------------------------------------------------
+tab_proj, tab_rank, tab_break, tab_scatter, tab_budget = st.tabs(
+    ["Projects", "Rankings", "Why a score", "Cost vs score", "Budget"]
+)
+
+# ---- Tab: Projects ----
+with tab_proj:
+    st.caption("Edit any cell, change a project's aim, add rows, or delete rows.")
+    edited = st.data_editor(
+        st.session_state.projects,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={"Aim": st.column_config.SelectboxColumn("Aim", options=AIMS, required=True)},
+        key="editor",
+    )
+    st.session_state.projects = edited
+    st.caption("Switch tabs to see rankings, score breakdowns, and budget allocation. "
+               "Changes here flow through to every tab.")
+
+# ---- Tab: Rankings ----
+with tab_rank:
+    if not bucket_scores:
+        st.info("Add projects and assign aims to see rankings.")
+    for aim in AIMS:
+        if aim not in bucket_scores:
+            continue
+        scored = bucket_scores[aim]
+        st.markdown(f"#### {aim}  \u00b7  {len(scored)} project{'s' if len(scored) != 1 else ''}")
+        # Horizontal bar, sorted ascending so highest sits at top in Plotly.
+        s = scored.sort_values("Score")
+        fig = go.Figure(go.Bar(
+            x=s["Score"], y=s["Project"], orientation="h",
+            marker_color=GREEN,
+            text=[f"{v:.3f}" for v in s["Score"]], textposition="outside",
+            hovertemplate="%{y}<br>Score %{x:.3f}<extra></extra>",
+        ))
+        fig.update_layout(
+            **PLOTLY_LAYOUT,
+            height=90 + 46 * len(s),  # guarantees a label row per bar (fixes overlap)
         )
-        st.altair_chart(rank_chart, use_container_width=True)
+        fig.update_xaxes(range=[0, 1.08], title="Score (0-1, within this aim)")
+        fig.update_yaxes(automargin=True, title=None)
+        st.plotly_chart(fig, use_container_width=True, key=f"rank_{aim}")
+        with st.expander(f"Table \u2014 {aim}"):
+            cols = ["Rank", "Project", "Score"] + CRIT_KEYS
+            show = scored[cols].copy()
+            show["Score"] = show["Score"].map(lambda x: f"{x:.3f}")
+            st.dataframe(show, use_container_width=True, hide_index=True)
 
-if not bucket_scores:
-    st.info("Add projects and assign aims to see rankings.")
-
-# ---------------------------------------------------------------------------
-# Visual 2: criteria breakdown for a selected project
-# Shows how a project's score is built from each criterion's weighted
-# contribution, so the score is transparent rather than a black box.
-# ---------------------------------------------------------------------------
-if bucket_scores:
-    st.subheader("Why a project scored what it did")
-    st.caption("Pick a project to see how each criterion contributed to its score.")
-    pick_aim = st.selectbox("Aim", list(bucket_scores.keys()), key="bd_aim")
-    aim_df = bucket_scores[pick_aim]
-    pick_proj = st.selectbox("Project", aim_df["Project"].tolist(), key="bd_proj")
-
-    eff = bucket_effweights[pick_aim]
-    row = aim_df[aim_df["Project"] == pick_proj].iloc[0]
-    # Re-derive each criterion's normalized value within this aim, then its
-    # weighted contribution. Contributions sum to the project's score.
-    parts = []
-    for c in CRITERIA:
-        norm = normalize_column(aim_df[c["key"]], c["direction"])
-        nv = norm[aim_df.index[aim_df["Project"] == pick_proj][0]]
-        parts.append({
-            "Criterion": c["label"],
-            "Contribution": nv * eff[c["key"]],
-            "Normalized value": nv,
-            "Weight": eff[c["key"]],
-        })
-    parts_df = pd.DataFrame(parts)
-    breakdown = (
-        alt.Chart(parts_df)
-        .mark_bar(color="#534AB7")
-        .encode(
-            x=alt.X("Contribution:Q", title="Weighted contribution to score"),
-            y=alt.Y("Criterion:N", sort="-x", title=None),
-            tooltip=[
-                "Criterion",
-                alt.Tooltip("Normalized value:Q", format=".2f"),
-                alt.Tooltip("Weight:Q", format=".0%"),
-                alt.Tooltip("Contribution:Q", format=".3f"),
-            ],
-        )
-        .properties(height=max(120, 30 * len(parts_df)))
-    )
-    st.altair_chart(breakdown, use_container_width=True)
-    st.caption(
-        f"Contributions sum to {pick_proj}'s score of {row['Score']:.3f}. "
-        "A criterion contributes more when the project scores well on it *and* "
-        "that criterion carries weight in this aim."
-    )
-
-# ---------------------------------------------------------------------------
-# Visual 3: cost vs score, within a single aim
-# A within-aim view to spot cheap high-scorers vs. expensive low-scorers.
-# Kept within one aim so the score axis stays comparable.
-# ---------------------------------------------------------------------------
-if bucket_scores:
-    st.subheader("Cost vs. score, within an aim")
-    st.caption("Top-left is the sweet spot: high score, low cost. Stays within one "
-               "aim so scores are comparable.")
-    sc_aim = st.selectbox("Aim", list(bucket_scores.keys()), key="sc_aim")
-    sc_df = bucket_scores[sc_aim]
-    scatter = (
-        alt.Chart(sc_df)
-        .mark_circle(size=160, color="#D85A30", opacity=0.8)
-        .encode(
-            x=alt.X("cost:Q", title="Estimated cost (USD)"),
-            y=alt.Y("Score:Q", title="Score (within this aim)",
-                    scale=alt.Scale(domain=[0, 1])),
-            tooltip=["Project", alt.Tooltip("Score:Q", format=".3f"), "cost",
-                     "npv", "roi", "risk"],
-        )
-        .properties(height=320)
-    )
-    labels = scatter.mark_text(align="left", dx=8, fontSize=11).encode(
-        text="Project:N", color=alt.value("#888780")
-    )
-    st.altair_chart(scatter + labels, use_container_width=True)
-
-# ---------------------------------------------------------------------------
-# Cross-bucket budget allocation (targets, with stranded money surfaced)
-# Per-aim shares are hard targets. Money does not move across aims
-# automatically. If a share strands money, the app explains why and prompts a
-# rebalance, rather than silently spending it elsewhere.
-# ---------------------------------------------------------------------------
-if bucket_scores:
-    st.subheader("Budget allocation across aims")
-    st.caption(
-        "Set a total budget and how it splits across aims. Within each aim, the "
-        "top-ranked projects are funded until that aim's share is used up. Shares "
-        "are hard targets \u2014 money does not move across aims automatically, by "
-        "design (aims are not comparable on one scale). If a share cannot be fully "
-        "used, the app tells you and asks you to rebalance."
-    )
-
-    total_budget = st.number_input(
-        "Total budget (USD)", min_value=0, value=1500000, step=50000,
-    )
-
-    present_aims = list(bucket_scores.keys())
-    st.markdown("**Share of budget per aim (%)** \u2014 normalized to 100%.")
-    share_cols = st.columns(len(present_aims))
-    raw_shares = {}
-    for i, aim in enumerate(present_aims):
-        raw_shares[aim] = share_cols[i].number_input(
-            aim, min_value=0, max_value=100,
-            value=round(100 / len(present_aims)), step=5, key=f"share_{aim}",
-        )
-
-    share_total = sum(raw_shares.values())
-    if share_total == 0:
-        st.warning("Set at least one aim's share above zero.")
+# ---- Tab: Why a score (criteria breakdown) ----
+with tab_break:
+    if not bucket_scores:
+        st.info("Add projects and assign aims first.")
     else:
-        st.markdown("**Funded projects per aim:**")
-        total_committed = 0.0
-        total_stranded = 0.0
-        needs_rebalance = []
-        budget_rows = []  # for the allocation visual
+        st.caption("How each criterion contributed to a project's score.")
+        a = st.selectbox("Aim", list(bucket_scores.keys()), key="bd_aim")
+        adf = bucket_scores[a]
+        p = st.selectbox("Project", adf["Project"].tolist(), key="bd_proj")
+        eff = bucket_eff[a]
+        idx = adf.index[adf["Project"] == p][0]
+        parts = []
+        for c in CRITERIA:
+            nv = normalize_column(adf[c["key"]], c["direction"])[idx]
+            parts.append({"Criterion": c["label"], "Contribution": nv * eff[c["key"]],
+                          "Normalized": nv, "Weight": eff[c["key"]]})
+        pdf = pd.DataFrame(parts).sort_values("Contribution")
+        fig = go.Figure(go.Bar(
+            x=pdf["Contribution"], y=pdf["Criterion"], orientation="h",
+            marker_color=PURPLE,
+            customdata=pdf[["Normalized", "Weight"]].values,
+            hovertemplate="%{y}<br>contribution %{x:.3f}"
+                          "<br>normalized %{customdata[0]:.2f} \u00d7 weight %{customdata[1]:.0%}<extra></extra>",
+        ))
+        fig.update_layout(**PLOTLY_LAYOUT, height=90 + 42 * len(pdf))
+        fig.update_xaxes(title="Weighted contribution to score")
+        fig.update_yaxes(automargin=True, title=None)
+        st.plotly_chart(fig, use_container_width=True, key="breakdown")
+        score = adf.loc[idx, "Score"]
+        st.caption(f"Contributions sum to {p}'s score of {score:.3f}. A criterion "
+                   "contributes more when the project scores well on it and that "
+                   "criterion carries weight in this aim.")
 
-        for aim in present_aims:
-            aim_budget = total_budget * raw_shares[aim] / share_total
-            scored = bucket_scores[aim]
-            chosen, spent = greedy_select(scored, aim_budget)
-            stranded = aim_budget - spent
-            total_committed += spent
-            total_stranded += stranded
-            budget_rows.append({"Aim": aim, "Committed": spent, "Unused": stranded,
-                                "Target": aim_budget})
+# ---- Tab: Cost vs score ----
+with tab_scatter:
+    if not bucket_scores:
+        st.info("Add projects and assign aims first.")
+    else:
+        st.caption("Top-left is the sweet spot: high score, low cost. Within one aim "
+                   "so scores stay comparable.")
+        a = st.selectbox("Aim", list(bucket_scores.keys()), key="sc_aim")
+        sdf = bucket_scores[a]
+        fig = go.Figure(go.Scatter(
+            x=sdf["cost"], y=sdf["Score"], mode="markers+text",
+            marker=dict(size=16, color=CORAL, line=dict(width=1, color=GREEN_D)),
+            text=sdf["Project"], textposition="top center", textfont=dict(size=11, color=MUTED),
+            hovertemplate="%{text}<br>cost $%{x:,.0f}<br>score %{y:.3f}<extra></extra>",
+        ))
+        fig.update_layout(**PLOTLY_LAYOUT, height=420)
+        fig.update_xaxes(title="Estimated cost (USD)")
+        fig.update_yaxes(title="Score (within this aim)", range=[0, 1.08])
+        st.plotly_chart(fig, use_container_width=True, key="scatter")
 
-            unfunded = scored[~scored["Project"].isin(set(chosen))]
-            if chosen:
-                line = (f"**{aim}** \u2014 target ${aim_budget:,.0f}, "
-                        f"committed ${spent:,.0f}: {', '.join(chosen)}")
-            else:
-                line = f"**{aim}** \u2014 target ${aim_budget:,.0f}, committed $0"
+# ---- Tab: Budget ----
+with tab_budget:
+    if not bucket_scores:
+        st.info("Add projects and assign aims first.")
+    else:
+        st.caption("Set a total budget and how it splits across aims. Shares are hard "
+                   "targets \u2014 money does not move across aims automatically (aims are "
+                   "not comparable). Unused money is flagged so you can rebalance.")
+        total_budget = st.number_input("Total budget (USD)", min_value=0, value=1500000, step=50000)
+        present = list(bucket_scores.keys())
+        st.markdown("**Share per aim (%)** \u2014 normalized to 100%.")
+        scol = st.columns(len(present))
+        raw_shares = {a: scol[i].number_input(a, 0, 100, round(100/len(present)), 5, key=f"share_{a}")
+                      for i, a in enumerate(present)}
+        stot = sum(raw_shares.values())
 
-            if stranded > 0.5 and len(unfunded) > 0:
-                cheapest = unfunded["cost"].min()
-                line += (f".  \n_Strands ${stranded:,.0f}: the cheapest unfunded "
-                         f"project here costs ${cheapest:,.0f}, more than the "
-                         f"${stranded:,.0f} left in this share._")
-                needs_rebalance.append(aim)
-                st.warning(line)
-            elif stranded > 0.5 and len(unfunded) == 0:
-                line += (f".  \n_Surplus ${stranded:,.0f}: this share more than "
-                         f"covers every project in the aim. Consider lowering its "
-                         f"share._")
-                needs_rebalance.append(aim)
-                st.info(line)
-            else:
-                st.success(line)
+        if stot == 0:
+            st.warning("Set at least one aim's share above zero.")
+        else:
+            rows, committed_total, rebalance = [], 0.0, []
+            for a in present:
+                ab = total_budget * raw_shares[a] / stot
+                chosen, spent = greedy_select(bucket_scores[a], ab)
+                strand = ab - spent
+                committed_total += spent
+                rows.append({"Aim": a, "Committed": spent, "Unused": strand})
+                unfunded = bucket_scores[a][~bucket_scores[a]["Project"].isin(set(chosen))]
+                if chosen:
+                    msg = f"**{a}** \u2014 target ${ab:,.0f}, committed ${spent:,.0f}: {', '.join(chosen)}"
+                else:
+                    msg = f"**{a}** \u2014 target ${ab:,.0f}, committed $0"
+                if strand > 0.5 and len(unfunded) > 0:
+                    msg += (f".  \n_Strands ${strand:,.0f}: cheapest unfunded project here "
+                            f"costs ${unfunded['cost'].min():,.0f}, more than the ${strand:,.0f} left._")
+                    rebalance.append(a); st.warning(msg)
+                elif strand > 0.5:
+                    msg += f".  \n_Surplus ${strand:,.0f}: share covers every project here. Consider lowering it._"
+                    rebalance.append(a); st.info(msg)
+                else:
+                    st.success(msg)
 
-        total_unspent = total_budget - total_committed
-        st.markdown(
-            f"**Committed across all aims: ${total_committed:,.0f} of "
-            f"${total_budget:,.0f}**  (unallocated: ${total_unspent:,.0f})"
-        )
+            unspent = total_budget - committed_total
+            kc1, kc2, kc3 = st.columns(3)
+            kpi_card(kc1, "Committed", f"${committed_total:,.0f}")
+            kpi_card(kc2, "Total budget", f"${total_budget:,.0f}")
+            kpi_card(kc3, "Unallocated", f"${unspent:,.0f}",
+                     sub=("shares don't fit costs" if unspent > 0.5 else "fully allocated"),
+                     sub_color=(CORAL if unspent > 0.5 else GREEN))
 
-        if needs_rebalance and total_unspent > 0.5:
-            st.warning(
-                f"\u2248${total_unspent:,.0f} is unallocated because the per-aim "
-                f"shares do not fit the project costs in: "
-                f"{', '.join(needs_rebalance)}. Adjust the shares above to use more "
-                f"of the budget. Money is not moved across aims automatically \u2014 "
-                f"that is a deliberate choice, since aims are not comparable on one "
-                f"scale."
-            )
+            bud = pd.DataFrame(rows)
+            fig = go.Figure()
+            fig.add_bar(y=bud["Aim"], x=bud["Committed"], name="Committed",
+                        orientation="h", marker_color=GREEN,
+                        hovertemplate="%{y}<br>committed $%{x:,.0f}<extra></extra>")
+            fig.add_bar(y=bud["Aim"], x=bud["Unused"], name="Unused",
+                        orientation="h", marker_color=GREY,
+                        hovertemplate="%{y}<br>unused $%{x:,.0f}<extra></extra>")
+            fig.update_layout(**PLOTLY_LAYOUT, barmode="stack",
+                              height=90 + 50 * len(bud),
+                              legend=dict(orientation="h", y=1.12, x=0))
+            fig.update_xaxes(title="USD")
+            fig.update_yaxes(automargin=True, title=None)
+            st.plotly_chart(fig, use_container_width=True, key="budget")
 
-        # Visual 4: target vs committed vs unused per aim (stacked bars).
-        # Comparing money across aims IS valid (dollars are dollars), unlike
-        # comparing scores. This makes the stranded-money story visual.
-        bud_df = pd.DataFrame(budget_rows)
-        melted = bud_df.melt(
-            id_vars="Aim", value_vars=["Committed", "Unused"],
-            var_name="Status", value_name="USD",
-        )
-        budget_chart = (
-            alt.Chart(melted)
-            .mark_bar()
-            .encode(
-                x=alt.X("USD:Q", title="USD", stack="zero"),
-                y=alt.Y("Aim:N", title=None),
-                color=alt.Color(
-                    "Status:N",
-                    scale=alt.Scale(domain=["Committed", "Unused"],
-                                    range=["#1D9E75", "#D3D1C7"]),
-                    legend=alt.Legend(title=None, orient="top"),
-                ),
-                tooltip=["Aim", "Status", alt.Tooltip("USD:Q", format="$,.0f")],
-            )
-            .properties(height=max(120, 46 * len(bud_df)))
-        )
-        st.altair_chart(budget_chart, use_container_width=True)
+            if rebalance and unspent > 0.5:
+                st.warning(
+                    f"\u2248${unspent:,.0f} is unallocated because per-aim shares don't fit "
+                    f"project costs in: {', '.join(rebalance)}. Adjust shares to use more of "
+                    f"the budget. Money is not moved across aims automatically \u2014 a "
+                    f"deliberate choice, since aims are not comparable on one scale."
+                )
