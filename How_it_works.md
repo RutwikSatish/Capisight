@@ -1,4 +1,4 @@
-# How Capisight works — method, choices, and why
+# How Capisight works: method, choices, and why
 
 This document explains the *what*, *how*, and *why* in more depth than the README. It is written so that someone can follow the reasoning behind every design choice, including the ones that were deliberately rejected.
 
@@ -82,3 +82,10 @@ Splitting a budget by aim *before* seeing project costs can leave money unused: 
 The larger concept pairs this decision tool with a **post-investment feedback layer**: given a funded project's claimed target and its actual operational metric over time, attempt to detect whether — and *when* — the spend actually moved the outcome.
 
 This is methodologically hard on real single-firm data: investment timing is not random, confounders are pervasive (co-occurring product launches, demand shifts), and there is rarely a clean control. The honest output is therefore often "too early to tell" or "can't identify". The intended approach is to validate the method on **synthetic data with a known injected lag** (proving it recovers the true effect, and correctly reports no effect on a null case) and to label the module clearly as experimental. It is described here for context; it is not part of this build.
+
+
+---
+
+## 7. Interface
+
+The app uses portfolio-level KPI cards (counts and dollars only — never a cross-aim score), tabbed sections (Projects, Rankings, Why a score, Cost vs score, Budget), and Plotly charts. Chart heights scale with the number of items so axis labels never overlap, and every score chart is scoped to a single aim so the visuals cannot imply a cross-aim comparison the method rejects.
