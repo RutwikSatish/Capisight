@@ -49,7 +49,7 @@ python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\act
 pip install -r requirements.txt
 
 # 3. run
-streamlit run app.py
+streamlit run capex_scoring_app.py
 ```
 
 The app opens in your browser (default `http://localhost:8501`).
@@ -104,22 +104,19 @@ This project is built to be defensible, so its assumptions are stated openly rat
 ## Project structure
 
 ```
-capisight/
-├── app.py              # the Streamlit application
-├── requirements.txt    # Python dependencies
-├── README.md           # this file
-├── .gitignore          # excludes secrets and local cruft
-├── .streamlit/
-│   └── config.toml     # app theme/config
-└── docs/
-    └── HOW_IT_WORKS.md  # deeper explanation: method, design choices, and why
+Capisight/
+├── capex_scoring_app.py   # the Streamlit application
+├── requirements.txt       # Python dependencies
+├── ReadMe.md              # this file
+├── How_it_works.md        # deeper explanation: method, design choices, and why
+└── index.html             # GitHub Pages landing page
 ```
 
 ---
 
 ## Deployment
 
-The app runs anywhere Streamlit runs. For a free hosted demo, Streamlit Community Cloud works (push this folder to a GitHub repo and deploy from it).
+The app runs anywhere Streamlit runs. A live demo is hosted on Streamlit Community Cloud: **https://capisight.streamlit.app/** (push this folder to a GitHub repo and deploy from it to host your own).
 
 **One honest caveat about free hosting:** free tiers (Streamlit Community Cloud and similar) put apps to sleep after a period of inactivity, so a demo link may show a "waking up" screen to a first visitor. Options: accept the sleep, run a scheduled keep-alive that genuinely wakes the app (a simple HTTP ping returns a static shell and does *not* wake the Python process — you need a headless-browser visit), or use a paid always-on tier. Verify current free-tier and sleep policies before relying on them, as they change.
 
