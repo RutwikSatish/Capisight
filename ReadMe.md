@@ -29,7 +29,7 @@ Capisight is the "front half" of a larger idea: it helps decide *where capital s
 2. **Scores projects on aim-appropriate criteria.** Each aim has its own weight profile across seven criteria (NPV, ROI, payback period, strategic score, operational impact, risk, cost). Weights are set with sliders and auto-normalize to 100%.
 3. **Ranks projects within each aim** — not in one pooled list.
 4. **Allocates a budget across aims.** You set a total budget and how it splits across aims. Within each aim, the highest-ranked projects are funded until that aim's share is used up. If a share cannot be fully used, the app explains why and prompts you to rebalance.
-5. **Shows visuals** that respect the same rule: charts compare scores only *within* an aim, and compare money (cost, budget) across aims where that is genuinely valid. See [Visuals](#visuals).
+5. **Presents it cleanly** — KPI summary cards, tabbed sections, and Plotly charts — while respecting the same rule: score visuals stay *within* an aim, and only money (cost, budget) is compared across aims. See [Visuals](#visuals).
 
 ## Why it works this way
 
@@ -88,7 +88,7 @@ Four charts, each built to respect the comparability rule (scores compare only w
 - **Cost vs. score (within an aim)** — a scatter to spot cheap high-scorers (top-left) versus expensive low-scorers. Kept within one aim so the score axis stays meaningful.
 - **Budget: committed vs. unused per aim** — stacked bars showing how much of each aim's target was committed versus left unused. Comparing dollars across aims *is* valid, so this makes the stranded-money story visual.
 
-Charts use Altair, which ships with Streamlit, so they add no meaningful deploy cost.
+Charts use Plotly (matching the project's other apps). The interface is organized into tabs (Projects, Rankings, Why a score, Cost vs score, Budget) with portfolio-level KPI cards at the top, so the page is scannable rather than one long scroll.
 
 ## Honesty notes (please read)
 
