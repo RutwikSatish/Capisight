@@ -529,7 +529,9 @@ for c in CRITERIA:
 
 if st.sidebar.button("Reset to defaults"):
     for k in CRIT_KEYS:
-        st.session_state[f"w_{active_aim}_{k}"] = DEFAULT_AIM_WEIGHTS[active_aim][k]
+        key = f"w_{active_aim}_{k}"
+        if key in st.session_state:
+            del st.session_state[key]
     st.rerun()
 
 # ---------------------------------------------------------------------------
@@ -751,7 +753,7 @@ with tab_proj:
     edited = st.data_editor(
         st.session_state.projects[display_cols],
         num_rows="dynamic",
-        use_container_width=True,
+        width='stretch',
         column_config={
             "Aim": st.column_config.SelectboxColumn("Aim", options=AIMS, required=True),
             "cost":        st.column_config.NumberColumn("Cost (USD)",    format="$%,.0f"),
@@ -797,7 +799,7 @@ with tab_rank:
             )
             fig.update_xaxes(range=[0, 1.12], title="Score (0-1, within this aim)")
             fig.update_yaxes(automargin=True, title=None)
-            st.plotly_chart(fig, use_container_width=True, key=f"rank_{aim}")
+            st.plotly_chart(fig, width='stretch', key=f"rank_{aim}")
 
             with st.expander(f"Table — {aim}"):
                 cols = ["Rank", "Project", "Score"] + CRIT_KEYS + ["assumptions", "source"]
@@ -812,11 +814,11 @@ with tab_rank:
 
                 if "source" in show.columns:
                     st.dataframe(
-                        show.style.applymap(color_source, subset=["source"]),
-                        use_container_width=True, hide_index=True
+                        show.style.map(color_source, subset=["source"]),
+                        width='stretch', hide_index=True
                     )
                 else:
-                    st.dataframe(show, use_container_width=True, hide_index=True)
+                    st.dataframe(show, width='stretch', hide_index=True)
 
             st.markdown("")
 
@@ -860,7 +862,7 @@ with tab_break:
             fig.update_layout(**PLOTLY_LAYOUT, height=80 + 44 * len(pdf))
             fig.update_xaxes(title="Weighted contribution to score")
             fig.update_yaxes(automargin=True)
-            st.plotly_chart(fig, use_container_width=True, key="breakdown_chart")
+            st.plotly_chart(fig, width='stretch', key="breakdown_chart")
 
         with col_detail:
             score = adf.loc[idx, "Score"]
@@ -1043,7 +1045,7 @@ with tab_scatter:
         fig.update_layout(**PLOTLY_LAYOUT, height=440)
         fig.update_xaxes(title="Estimated cost (USD)")
         fig.update_yaxes(title="Score (within aim)", range=[0, 1.12])
-        st.plotly_chart(fig, use_container_width=True, key="scatter_chart")
+        st.plotly_chart(fig, width='stretch', key="scatter_chart")
         st.caption("Blue = AI-extracted from document. Grey = manually entered.")
 
 # ============================================================
@@ -1120,7 +1122,7 @@ with tab_budget:
             )
             fig.update_xaxes(title="USD")
             fig.update_yaxes(automargin=True)
-            st.plotly_chart(fig, use_container_width=True, key="budget_chart")
+            st.plotly_chart(fig, width='stretch', key="budget_chart")
 
             if rebalance and unspent > 0.5:
                 st.warning(
