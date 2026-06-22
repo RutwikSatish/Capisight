@@ -390,81 +390,98 @@ def greedy_select(scored: pd.DataFrame, budget: float):
     return chosen, spent
 
 
-def dcf_sensitivity(base_cost: float, base_roi: float,
+def dcf_sensitivity(base_cost: float, base_npv: float, base_payback: float,
                     discount_rate_pct: float, useful_life_yrs: float,
                     cost_overrun_pct: float, revenue_cut_pct: float) -> pd.DataFrame:
     """
-    Recalculates NPV and payback from first principles using user-provided inputs.
+    Delta-based DCF sensitivity anchored to the stated NPV from the business case.
 
-    Formula: NPV = sum(CF_t / (1+r)^t for t=1..n) - C0
-    where CF_t = constant annual cash inflow (simplified uniform cash flow),
-          r    = discount rate per period,
-          n    = useful life in years,
-          C0   = initial capital cost.
+    Design rationale
+    ----------------
+    A real business case states NPV, ROI, and payback as independently computed
+    figures that are not necessarily internally consistent (different models,
+    conventions, or rounding). Recomputing NPV from scratch using ROI would
+    produce a different base-case number than the business case states, which
+    would confuse any reviewer who knows the original figure.
 
-    Payback = C0 / annual_CF (simple, undiscounted).
+    Instead this function:
+      1. Uses the STATED payback to derive annual cash flow (payback = C0 / CF,
+         so CF = C0 / payback). Payback is the most direct and unambiguous
+         relationship: it is always undiscounted cost divided by annual cash flow.
+      2. Uses the STATED NPV as the base-case anchor.
+      3. Computes delta NPV for each scenario using DCF:
+         delta = Σ(CF_scenario/(1+r_scenario)^t) - Σ(CF_base/(1+r_base)^t)
+      4. Adds the delta to the stated NPV to get the scenario NPV.
+         This preserves the business case's own figure while showing directional impact.
 
-    Assumption: cash flows are uniform across the project life. This is a
-    simplification — real projects have non-uniform cash flows. For those,
-    users should supply their own DCF model. This analysis is directional.
+    Formula: delta_NPV = Σ((CF_s/(1+r_s)^t) - (CF_b/(1+r_b)^t)) for t=1..n
+    minus any change in capital cost.
+
+    Payback (undiscounted simple payback) = adjusted_cost / adjusted_CF.
+
+    Assumption: uniform cash flows across project life. Disclosed in the UI.
 
     Sources:
       Brealey, Myers & Allen, Principles of Corporate Finance (13th ed.), Ch. 5
-      Graham & Harvey (2001), The theory and practice of corporate finance,
-        Journal of Financial Economics 60(2-3): 187-243
+      Graham & Harvey (2001), JFE 60(2-3): 187-243
     """
     if useful_life_yrs <= 0 or base_cost <= 0 or discount_rate_pct <= 0:
         return pd.DataFrame()
-
-    # Annual cash inflow: derived from ROI and cost
-    # ROI = net_return / C0, so net_return = ROI * C0
-    # Assuming net_return spread evenly: annual_CF = net_return / n
-    annual_cf = base_cost * (base_roi / 100) / useful_life_yrs if base_roi > 0 else 0.0
-
-    if annual_cf <= 0:
+    if base_payback <= 0:
         return pd.DataFrame()
 
-    def calc_npv(cost, cf, rate, n):
-        return sum(cf / (1 + rate) ** t for t in range(1, int(n) + 1)) - cost
+    # Derive annual CF from stated payback: CF = C0 / payback
+    # This is the most direct derivation — payback is always undiscounted C0/CF
+    annual_cf_base = base_cost / base_payback
 
-    def calc_payback(cost, cf):
-        return cost / cf if cf > 0 else float("inf")
+    def annuity(cf, rate, n):
+        return sum(cf / (1 + rate) ** t for t in range(1, int(n) + 1))
 
-    r_base = discount_rate_pct / 100
-    adj_cost = base_cost * (1 + cost_overrun_pct / 100)
-    adj_cf   = annual_cf * (1 - revenue_cut_pct / 100)
+    r_base    = discount_rate_pct / 100
+    base_ann  = annuity(annual_cf_base, r_base, useful_life_yrs)
+
+    adj_cost  = base_cost * (1 + cost_overrun_pct / 100)
+    adj_cf    = annual_cf_base * (1 - revenue_cut_pct / 100)
+
+    def scenario_npv(c0, cf, rate):
+        ann = annuity(cf, rate, useful_life_yrs)
+        delta = (ann - c0) - (base_ann - base_cost)
+        return base_npv + delta
+
+    def scenario_payback(c0, cf):
+        return c0 / cf if cf > 0 else float("inf")
 
     rows = []
     scenarios = [
         ("Base case",
-         base_cost, annual_cf, r_base,
-         f"Discount rate {discount_rate_pct:.1f}%, life {int(useful_life_yrs)} yrs, uniform CF"),
+         base_cost, annual_cf_base, r_base,
+         f"As stated in business case — discount rate {discount_rate_pct:.1f}%, payback-derived CF"),
         ("Discount rate +2pp",
-         base_cost, annual_cf, r_base + 0.02,
+         base_cost, annual_cf_base, r_base + 0.02,
          f"Rate rises to {discount_rate_pct+2:.1f}% — tests hurdle rate sensitivity"),
         ("Discount rate +5pp",
-         base_cost, annual_cf, r_base + 0.05,
+         base_cost, annual_cf_base, r_base + 0.05,
          f"Rate rises to {discount_rate_pct+5:.1f}% — significant tightening scenario"),
         (f"Revenue / savings down {int(revenue_cut_pct)}%",
          base_cost, adj_cf, r_base,
          f"Annual cash inflow reduced by {int(revenue_cut_pct)}% — demand or price risk"),
         (f"Capital cost overrun +{int(cost_overrun_pct)}%",
-         adj_cost, annual_cf, r_base,
+         adj_cost, annual_cf_base, r_base,
          f"Capital cost rises to ${adj_cost:,.0f} — implementation risk"),
     ]
 
     for label, c0, cf, r, note in scenarios:
-        npv = calc_npv(c0, cf, r, useful_life_yrs)
-        pb  = calc_payback(c0, cf)
+        npv = scenario_npv(c0, cf, r)
+        pb  = scenario_payback(c0, cf)
         rows.append({
-            "Scenario":       label,
-            "Rate":           f"{r*100:.1f}%",
-            "Adj. NPV":       npv,
-            "Adj. Payback":   pb,
-            "NPV display":    f"${npv:,.0f}",
-            "Payback display":f"{pb:.1f} yrs" if pb < 99 else "N/A",
-            "Note":           note,
-            "Positive NPV":   npv > 0,
+            "Scenario":        label,
+            "Rate":            f"{r*100:.1f}%",
+            "Adj. NPV":        npv,
+            "Adj. Payback":    pb,
+            "NPV display":     f"${npv:,.0f}",
+            "Payback display": f"{pb:.1f} yrs" if pb < 99 else "N/A",
+            "Note":            note,
+            "Positive NPV":    npv > 0,
         })
 
     return pd.DataFrame(rows)
@@ -544,6 +561,40 @@ st.markdown("""
   <p style="color:#6B7280;font-size:14px;margin-top:4px;max-width:640px">
     Upload a business case document and let AI extract the numbers. Score, compare, and allocate capital across strategic aims. Stress-test assumptions before you commit.
   </p>
+</div>
+""", unsafe_allow_html=True)
+
+# How it works strip
+st.markdown("""
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px">
+  <div style="background:#FFFFFF;border:1px solid #E8EAF0;border-radius:10px;padding:16px 18px;display:flex;gap:12px;align-items:flex-start">
+    <div style="font-size:20px;flex-shrink:0">📄</div>
+    <div>
+      <div style="font-size:12px;font-weight:600;color:#1A1D23;margin-bottom:3px">1. Upload or enter</div>
+      <div style="font-size:12px;color:#6B7280">Upload a PDF or Excel business case. AI extracts the numbers. Or add projects manually.</div>
+    </div>
+  </div>
+  <div style="background:#FFFFFF;border:1px solid #E8EAF0;border-radius:10px;padding:16px 18px;display:flex;gap:12px;align-items:flex-start">
+    <div style="font-size:20px;flex-shrink:0">📊</div>
+    <div>
+      <div style="font-size:12px;font-weight:600;color:#1A1D23;margin-bottom:3px">2. Score within aims</div>
+      <div style="font-size:12px;color:#6B7280">Projects are ranked within their strategic aim only. A safety project and a growth bet are never on the same list.</div>
+    </div>
+  </div>
+  <div style="background:#FFFFFF;border:1px solid #E8EAF0;border-radius:10px;padding:16px 18px;display:flex;gap:12px;align-items:flex-start">
+    <div style="font-size:20px;flex-shrink:0">🔍</div>
+    <div>
+      <div style="font-size:12px;font-weight:600;color:#1A1D23;margin-bottom:3px">3. See why each scored</div>
+      <div style="font-size:12px;color:#6B7280">Score Breakdown shows exactly which criteria drove the result. Assumptions panel surfaces what the business case promised.</div>
+    </div>
+  </div>
+  <div style="background:#FFFFFF;border:1px solid #E8EAF0;border-radius:10px;padding:16px 18px;display:flex;gap:12px;align-items:flex-start">
+    <div style="font-size:20px;flex-shrink:0">📉</div>
+    <div>
+      <div style="font-size:12px;font-weight:600;color:#1A1D23;margin-bottom:3px">4. Stress-test before committing</div>
+      <div style="font-size:12px;color:#6B7280">Sensitivity analysis shows how NPV changes if the discount rate rises, demand falls, or costs overrun.</div>
+    </div>
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -911,11 +962,13 @@ with tab_sensitivity:
             sel_sens = st.selectbox("Select project to stress-test", all_projects)
             row = valid[valid["Project"] == sel_sens].iloc[0]
 
-            base_cost = float(row.get("cost", 0) or 0)
-            base_roi  = float(row.get("roi", 0) or 0)
+            base_cost    = float(row.get("cost", 0) or 0)
+            base_npv     = float(row.get("npv", 0) or 0)
+            base_payback = float(row.get("payback", 0) or 0)
+            base_roi     = float(row.get("roi", 0) or 0)
 
-            if base_cost <= 0 or base_roi <= 0:
-                st.warning("This project needs Cost and ROI values to run sensitivity analysis. Add them in the Projects tab.")
+            if base_cost <= 0 or base_payback <= 0:
+                st.warning("This project needs Cost and Payback values to run sensitivity analysis. Add them in the Projects tab.")
             else:
                 st.markdown("""
 <div class="capex-card-amber">
@@ -962,12 +1015,16 @@ with tab_sensitivity:
     <span style="font-weight:600;font-size:12px;font-family:'IBM Plex Mono',monospace">${base_cost:,.0f}</span>
   </div>
   <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #F3F4F6">
-    <span style="color:#6B7280;font-size:12px">ROI</span>
-    <span style="font-weight:600;font-size:12px;font-family:'IBM Plex Mono',monospace">{base_roi:.1f}%</span>
+    <span style="color:#6B7280;font-size:12px">Stated NPV</span>
+    <span style="font-weight:600;font-size:12px;font-family:'IBM Plex Mono',monospace">${base_npv:,.0f}</span>
+  </div>
+  <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #F3F4F6">
+    <span style="color:#6B7280;font-size:12px">Stated payback</span>
+    <span style="font-weight:600;font-size:12px;font-family:'IBM Plex Mono',monospace">{base_payback:.1f} yrs</span>
   </div>
   <div style="display:flex;justify-content:space-between;padding:4px 0">
     <span style="color:#6B7280;font-size:12px">Implied annual CF</span>
-    <span style="font-weight:600;font-size:12px;font-family:'IBM Plex Mono',monospace">${base_cost * (base_roi/100) / useful_life:,.0f}/yr</span>
+    <span style="font-weight:600;font-size:12px;font-family:'IBM Plex Mono',monospace">${base_cost/base_payback:,.0f}/yr</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -983,7 +1040,7 @@ with tab_sensitivity:
 
                 with col_results:
                     sens_df = dcf_sensitivity(
-                        base_cost, base_roi,
+                        base_cost, base_npv, base_payback,
                         discount_rate, useful_life,
                         cost_overrun, revenue_cut
                     )
@@ -1013,11 +1070,13 @@ with tab_sensitivity:
 
                         st.markdown("""
 <div style="font-size:11px;color:#9CA3AF;margin-top:8px;padding:10px;background:#F9FAFB;border-radius:6px">
-  <strong>Methodology:</strong> Standard DCF — NPV = Σ(CF/(1+r)^t) − C0, where CF is derived from
-  ROI × cost ÷ useful life (uniform cash flow assumption). Payback = cost ÷ annual CF (undiscounted).
+  <strong>Methodology:</strong> Base case anchors to the stated NPV from the business case.
+  Annual cash flow is derived from stated payback (CF = cost ÷ payback — the most direct, unambiguous relationship).
+  Scenario NPVs are computed as: stated NPV + delta, where delta = change in discounted cash flow annuity under each scenario.
+  This preserves the business case's own figure while showing directional impact of assumption shifts.
+  Formula: delta = Σ(CF_scenario/(1+r_scenario)^t) − Σ(CF_base/(1+r_base)^t), for t=1..n.
   Source: Brealey, Myers & Allen, <em>Principles of Corporate Finance</em>, Ch. 5.
-  Graham & Harvey (2001, JFE) found NPV and payback are the two most widely used methods by CFOs.
-  <br><br>Limitation: uniform cash flows are a simplification. Non-uniform projects require a full cash flow schedule.
+  <br><br>Limitation: uniform cash flows assumed. Non-uniform projects require a full cash flow schedule.
 </div>
 """, unsafe_allow_html=True)
 
