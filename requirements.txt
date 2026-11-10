@@ -1,6 +1,0 @@
-streamlit
-pandas
-plotly
-groq
-PyPDF2
-openpyxl
