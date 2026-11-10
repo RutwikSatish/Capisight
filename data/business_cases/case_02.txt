@@ -1,0 +1,3 @@
+Maintenance Engineering - Cooling Tower Pump Replacement
+
+The three circulation pumps serving the cooling tower are at end of life and have required four emergency repairs in 18 months. Replacing them with a matched set is expected to cost about $0.38 million installed. At the 8% hurdle rate we use for maintenance projects, and assuming a 12-year service life, the avoided repair costs and energy savings return the investment in roughly 42 months. A formal NPV was not prepared for this request, and no ROI figure has been calculated. The current annual maintenance budget for the plant is $2.9 million.

@@ -1,0 +1,9 @@
+Item                      | Value
+Project                   | Spindle Retrofit, CNC Cell 7
+Capital cost              | 96,500
+Useful life               | 10 yrs
+Discount rate             | 7%
+Payback                   | 5.1 years
+NPV                       | 12,300
+ROI                       | 27%
+Notes                     | Values in USD. Prior-year retrofit on Cell 3 cost 88,000.

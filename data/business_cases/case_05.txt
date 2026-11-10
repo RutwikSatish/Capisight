@@ -1,0 +1,3 @@
+Robotics Cell Pilot - Business Case Summary
+
+We propose a pilot of a single robotic welding cell. The funding envelope for the program is capped at $500k, and this pilot is sized at $425k. Expected NPV is $190k (discount rate 11%, 7-year life). The pilot is expected to return 46% on investment over its life and to pay back in 2.9 years. Success of the pilot would unlock a follow-on rollout, which is not included here.

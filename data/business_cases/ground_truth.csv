@@ -1,0 +1,11 @@
+case_id,project_name,aim,cost,npv,roi,payback,discount_rate_pct,useful_life_yrs
+case_01,Packaging Line Automation (Line 4),New growth,750000,500000,150,3.2,10,8
+case_02,Cooling Tower Pump Replacement,Business-as-usual,380000,,,3.5,8,12
+case_03,Warehouse Racking Expansion,New growth,1100000,430000,,3.5,9,15
+case_04,Paint Shop Fume Extraction Upgrade,Regulatory / safety,210000,-48000,,,9,15
+case_05,Robotics Cell Pilot,New growth,425000,190000,46,2.9,11,7
+case_06,Spindle Retrofit CNC Cell 7,Improve performance,96500,12300,27,5.1,7,10
+case_07,ERP Production Module Upgrade,Improve performance,2400000,850000,90,2.667,12,5
+case_08,Forklift Fleet Replacement,Business-as-usual,310000,-22000,25,6.4,9.5,8
+case_09,Data Hall Cooling Expansion,New growth,600000,300000,35,3.8,10,6
+case_10,Dock Leveler Replacement,Business-as-usual,54000,,,,,

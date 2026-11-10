@@ -1,0 +1,6 @@
+Data Hall Cooling Expansion - Scenario Summary
+
+Capital required: $600,000.
+Base case: NPV $300,000, ROI 35%, payback 3.8 years.
+Downside case (demand 25% lower): NPV $120,000, ROI 18%, payback 5.2 years.
+Both cases use a 10% discount rate and a 6-year useful life. The base case is the recommended planning case.

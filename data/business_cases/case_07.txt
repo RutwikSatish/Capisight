@@ -1,0 +1,3 @@
+Business Case: ERP Production Module Upgrade
+
+Total project budget is $2.4 million, which already includes a contingency of $240,000. The team projects payback in 2 years and 8 months. Valuation uses a 12% discount rate across a 5-year horizon; the resulting NPV is $850,000 and the lifetime ROI is 90%. Implementation is planned over two quarters; licensing is a separate operating expense and is excluded from this request.

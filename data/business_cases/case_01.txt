@@ -1,0 +1,15 @@
+CAPITAL REQUEST MEMO  |  Packaging Line Automation (Line 4)
+
+Prepared by: Operations Finance        Date: March 12
+
+Summary
+Operations requests approval to automate the secondary packaging step on Line 4 to support the volume commitments in the new customer contract.
+
+Financials
+Total capital cost: $750,000 (equipment, installation, commissioning).
+Net present value: $500,000 at a 10% discount rate over an 8-year useful life.
+Simple payback: 3.2 years.
+Return on investment (lifetime, undiscounted): 150%.
+
+Context
+Our Line 2 automation in 2021 cost $1.2 million and paid back in 4.1 years. That project is not part of this request.
